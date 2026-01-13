@@ -1,24 +1,27 @@
 # Task Manager Application
 
-A full-stack task management application with user authentication and CRUD operations for tasks.
+A comprehensive web-based task management system with user authentication, OTP verification, and modern UI.
 
 ## Features
 
-- ✅ User Authentication (Register/Login)
-- ✅ Task CRUD Operations
-- ✅ Task Status Management (Pending, In Progress, Completed)
-- ✅ Task Priority Levels (Low, Medium, High)
-- ✅ Due Date Tracking
-- ✅ Task Filtering (by status, priority)
-- ✅ Task Search (by title or description)
-- ✅ Task Sorting (by date, title, due date)
-- ✅ Pagination Support
-- ✅ Task Statistics Dashboard
-- ✅ Input Validation
-- ✅ Modern, Responsive UI
-- ✅ JWT Authentication
-- ✅ Secure Password Hashing
-- ✅ RESTful API
+- User Authentication (Register/Login with JWT)
+- OTP Verification System (Email/SMS)
+- Password Reset Functionality
+- Task CRUD Operations (Create, Read, Update, Delete)
+- Task Status Management (Pending, In Progress, Completed)
+- Task Priority Levels (Low, Medium, High)
+- Due Date Tracking
+- Task Filtering (by status, priority, search)
+- Task Sorting (by date, title, due date)
+- Pagination Support
+- Task Statistics Dashboard with Charts
+- Kanban Board View (Drag & Drop)
+- Modern React-based Dashboard
+- Input Validation & Error Handling
+- Responsive Design (Mobile-friendly)
+- JWT Authentication
+- Secure Password Hashing
+- RESTful API Design
 
 ## Tech Stack
 
@@ -29,11 +32,16 @@ A full-stack task management application with user authentication and CRUD opera
 - JWT (JSON Web Tokens)
 - bcryptjs
 - CORS
+- Nodemailer (Email OTP)
+- Twilio (SMS OTP)
 
 ### Frontend
-- Vanilla JavaScript (ES6 Modules)
+- React (via CDN)
 - HTML5
-- CSS3
+- CSS3 with Tailwind CSS
+- Chart.js (Statistics)
+- React Beautiful DND (Kanban)
+- Babel (JSX in browser)
 - LocalStorage for token management
 
 ## Project Structure
@@ -44,147 +52,136 @@ task-manager/
 ├── backend/
 │   ├── config/
 │   │   └── db.js
-│   │
 │   ├── controllers/
 │   │   ├── authController.js
-│   │   └── taskController.js
-│   │
+│   │   ├── taskController.js
+│   │   └── otpController.js
 │   ├── middleware/
 │   │   ├── authMiddleware.js
-│   │   └── errorHandler.js
-│   │
+│   │   ├── errorMiddleware.js
+│   │   └── validateTask.js
 │   ├── models/
 │   │   ├── User.js
-│   │   └── Task.js
-│   │
+│   │   ├── Task.js
+│   │   └── OTP.js
 │   ├── routes/
 │   │   ├── authRoutes.js
 │   │   ├── taskRoutes.js
+│   │   ├── otpRoutes.js
 │   │   └── index.js
-│   │
-│   ├── .env
+│   ├── services/
+│   │   └── otpService.js
+│   ├── .env.example
 │   ├── server.js
 │   └── package.json
 │
 ├── frontend/
 │   ├── css/
 │   │   └── style.css
-│   │
 │   ├── js/
 │   │   └── app.js
-│   │
+│   ├── dashboard.html
 │   ├── login.html
 │   ├── register.html
-│   └── dashboard.html
+│   ├── forgot-password.html
+│   ├── reset-password.html
+│   └── verify-otp.html
 │
+├── INSTALLATION.md
 ├── README.md
 └── .gitignore
 ```
 
-## Setup Instructions
+## Quick Start
 
 ### Prerequisites
 - Node.js (v14 or higher)
 - MongoDB (local or MongoDB Atlas)
 - npm or yarn
 
-### Backend Setup
+### Installation
 
-1. **Navigate to backend directory:**
+1. **Clone the repository:**
+   ```bash
+   git clone <repository-url>
+   cd task-manager
+   ```
+
+2. **Backend Setup:**
    ```bash
    cd backend
-   ```
-
-2. **Install dependencies:**
-   ```bash
    npm install
-   ```
-
-3. **Create `.env` file:**
-   ```env
-   PORT=5000
-   MONGO_URI=your_mongodb_connection_string
-   JWT_SECRET=your_super_secret_jwt_key
-   NODE_ENV=development
-   ```
-
-   Example MongoDB URI:
-   - Local: `mongodb://localhost:27017/task-manager`
-   - Atlas: `mongodb+srv://username:password@cluster.mongodb.net/task-manager?retryWrites=true&w=majority`
-
-4. **Run the server:**
-   ```bash
-   # Development mode (with auto-reload)
-   npm run dev
-   
-   # Production mode
+   cp .env.example .env
+   # Edit .env with your configuration
    npm start
    ```
 
-   Server will run on `http://localhost:5000`
+3. **Access Application:**
+   - Web App: http://localhost:5000/login
+   - API: http://localhost:5000/api
 
-### Frontend Setup
+## Environment Variables
 
-1. **Open frontend files:**
-   - Simply open `frontend/login.html` in your browser
-   - Or use a local server:
-     ```bash
-     # Using Python
-     cd frontend
-     python -m http.server 8000
-     
-     # Using Node.js (http-server)
-     npx http-server frontend -p 8000
-     ```
+Create a `.env` file in `backend` directory:
 
-2. **Update API URL (if needed):**
-   - Open `frontend/js/app.js`
-   - Update `API_URL` if your backend runs on a different port/domain
+```env
+# Server Configuration
+PORT=5000
+NODE_ENV=development
+
+# Database Configuration
+MONGODB_URI=mongodb://localhost:27017/task-manager
+
+# JWT Configuration
+JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
+
+# Email Configuration (for OTP)
+EMAIL_HOST=smtp.gmail.com
+EMAIL_PORT=587
+EMAIL_USER=your-email@gmail.com
+EMAIL_PASS=your-app-password
+
+# Twilio Configuration (for SMS OTP - optional)
+TWILIO_ACCOUNT_SID=your-twilio-account-sid
+TWILIO_AUTH_TOKEN=your-twilio-auth-token
+TWILIO_PHONE_NUMBER=your-twilio-phone-number
+```
 
 ## API Endpoints
 
 ### Authentication
 - `POST /api/auth/register` - Register a new user
-  - Body: `{ name, email, password }`
 - `POST /api/auth/login` - Login user
-  - Body: `{ email, password }`
 - `GET /api/auth/me` - Get current user (Protected)
-  - Headers: `Authorization: Bearer <token>`
+- `POST /api/auth/forgot-password` - Request password reset
+- `POST /api/auth/reset-password` - Reset password
 
 ### Tasks
 - `GET /api/tasks` - Get all tasks (Protected)
-  - Query params: `status`, `priority`, `search`, `sortBy`, `page`, `limit`
-  - Example: `/api/tasks?status=pending&priority=high&page=1&limit=10`
 - `GET /api/tasks/stats` - Get task statistics (Protected)
 - `GET /api/tasks/:id` - Get single task (Protected)
 - `POST /api/tasks` - Create task (Protected)
-  - Body: `{ title, description?, status?, priority?, dueDate? }`
 - `PUT /api/tasks/:id` - Update task (Protected)
-  - Body: `{ title?, description?, status?, priority?, dueDate? }`
 - `DELETE /api/tasks/:id` - Delete task (Protected)
+
+### OTP
+- `POST /api/otp/send-registration` - Send registration OTP
+- `POST /api/otp/send-login` - Send login OTP
+- `POST /api/otp/verify` - Verify OTP
 
 ## Usage
 
 1. **Register/Login:**
    - Open `register.html` to create a new account
-   - Or use `login.html` if you already have an account
+   - Use `login.html` if you already have an account
+   - Optional OTP verification for enhanced security
 
 2. **Manage Tasks:**
    - After logging in, you'll be redirected to the dashboard
-   - Click "Add Task" to create a new task
-   - Edit or delete tasks using the action buttons
-   - Filter tasks by status and priority
-
-## Environment Variables
-
-Create a `.env` file in the `backend` directory:
-
-```env
-PORT=5000
-MONGO_URI=your_mongodb_connection_string
-JWT_SECRET=your_secret_key_here
-NODE_ENV=development
-```
+   - Create tasks with title, description, priority, and due date
+   - Use List View or Kanban Board for task management
+   - Filter and sort tasks as needed
+   - View statistics and progress charts
 
 ## Security Features
 
@@ -192,23 +189,10 @@ NODE_ENV=development
 - JWT token authentication
 - Protected routes with middleware
 - User-specific task access
-- Input validation
+- Input validation and sanitization
+- OTP verification system
+- CORS protection
 - Error handling
-
-## Development
-
-### Backend
-- Uses Express.js for routing
-- MongoDB with Mongoose for database
-- JWT for authentication
-- Error handling middleware
-- CORS enabled
-
-### Frontend
-- Vanilla JavaScript (ES6 Modules)
-- LocalStorage for token storage
-- Responsive design
-- Modern UI/UX
 
 ## License
 
@@ -216,4 +200,4 @@ ISC
 
 ## Author
 
-Task Manager Application
+Task Manager Application - Full-Stack Web Application
