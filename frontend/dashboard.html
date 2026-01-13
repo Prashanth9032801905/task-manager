@@ -1,0 +1,1133 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dashboard - Task Manager</title>
+
+    <!-- Google Fonts - Inter & Poppins -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Poppins:wght@300;400;500;600;700;800;900&display=swap"
+        rel="stylesheet">
+
+    <!-- Tailwind CSS (for glassmorphism + layout) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
+                        display: ['Poppins', 'system-ui', 'sans-serif'],
+                    },
+                    colors: {
+                        indigoGlass: "#6366f1",
+                        violetGlass: "#8b5cf6",
+                        purpleGlass: "#a855f7",
+                    },
+                    animation: {
+                        'float': 'float 6s ease-in-out infinite',
+                        'pulse-slow': 'pulse 3s ease-in-out infinite',
+                        'glow': 'glow 2s ease-in-out infinite alternate',
+                    },
+                    keyframes: {
+                        float: {
+                            '0%, 100%': { transform: 'translateY(0px)' },
+                            '50%': { transform: 'translateY(-10px)' },
+                        },
+                        glow: {
+                            '0%': { boxShadow: '0 0 20px rgba(99, 102, 241, 0.3)' },
+                            '100%': { boxShadow: '0 0 30px rgba(99, 102, 241, 0.6)' },
+                        },
+                    },
+                },
+            },
+        };
+    </script>
+
+    <!-- React + ReactDOM (UMD) -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+    <!-- Babel for JSX in the browser -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+    <!-- react-beautiful-dnd (UMD) -->
+    <script src="https://unpkg.com/react-beautiful-dnd@13.1.1/dist/react-beautiful-dnd.min.js"></script>
+</head>
+
+<body
+    class="min-h-screen bg-gradient-to-br from-indigo-600 via-purple-600 to-pink-600 text-white antialiased font-sans">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const {
+            useState,
+            useEffect,
+            useMemo,
+        } = React;
+        const {
+            DragDropContext,
+            Droppable,
+            Draggable,
+        } = window.ReactBeautifulDnd || {};
+
+        const API_URL = "/api";
+
+        // --------- Utility / API helpers (mirrors existing frontend/js/app.js) ----------
+        const getToken = () => localStorage.getItem("token");
+        const getUser = () =>
+            JSON.parse(localStorage.getItem("user") || "null");
+
+        const apiRequest = async (url, options = {}) => {
+            const token = getToken();
+            const headers = {
+                "Content-Type": "application/json",
+                ...(options.headers || {}),
+            };
+            if (token) {
+                headers.Authorization = `Bearer ${token}`;
+            }
+            const res = await fetch(`${API_URL}${url}`, {
+                ...options,
+                headers,
+            });
+            let data;
+            try {
+                data = await res.json();
+            } catch {
+                data = {};
+            }
+            if (!res.ok) {
+                throw new Error(data.message || "Something went wrong");
+            }
+            return data;
+        };
+
+        const getTasksApi = (filters) => {
+            const params = new URLSearchParams();
+            if (filters.status) params.append("status", filters.status);
+            if (filters.priority) params.append("priority", filters.priority);
+            if (filters.search) params.append("search", filters.search);
+            if (filters.sortBy) params.append("sortBy", filters.sortBy);
+            if (filters.page) params.append("page", filters.page);
+            if (filters.limit) params.append("limit", filters.limit);
+            const query = params.toString();
+            return apiRequest(`/tasks${query ? `?${query}` : ""}`);
+        };
+
+        const getTaskStatsApi = () => apiRequest("/tasks/stats");
+        const createTaskApi = (body) =>
+            apiRequest("/tasks", {
+                method: "POST",
+                body: JSON.stringify(body),
+            });
+        const updateTaskApi = (id, body) =>
+            apiRequest(`/tasks/${id}`, {
+                method: "PUT",
+                body: JSON.stringify(body),
+            });
+        const deleteTaskApi = (id) =>
+            apiRequest(`/tasks/${id}`, {
+                method: "DELETE",
+            });
+
+        const formatDate = (dateString) => {
+            if (!dateString) return "-";
+            const d = new Date(dateString);
+            return d.toLocaleDateString("en-US", {
+                year: "numeric",
+                month: "short",
+                day: "numeric",
+            });
+        };
+
+        const getStatusBadge = (status) => {
+            const map = {
+                pending: "bg-amber-500/30 text-amber-100 border-amber-400/50 shadow-lg",
+                "in-progress": "bg-blue-500/30 text-blue-100 border-blue-400/50 shadow-lg",
+                completed: "bg-emerald-500/30 text-emerald-100 border-emerald-400/50 shadow-lg",
+            };
+            return map[status] || map.pending;
+        };
+
+        const getPriorityBadge = (priority) => {
+            const map = {
+                low: "bg-sky-500/30 text-sky-100 border-sky-400/50 shadow-lg",
+                medium: "bg-indigo-500/30 text-indigo-100 border-indigo-400/50 shadow-lg",
+                high: "bg-rose-500/30 text-rose-100 border-rose-400/50 shadow-lg",
+            };
+            return map[priority] || map.medium;
+        };
+
+        // -------------------- Reusable Glass Card --------------------
+        const GlassCard = ({ children, className = "" }) => (
+            <div
+                className={`
+            rounded-3xl bg-white/20 backdrop-blur-md border border-white/30
+            shadow-xl hover:shadow-2xl transition-all duration-300 ease-out
+            hover:scale-[1.02] hover:bg-white/25
+            ${className}
+          `}
+            >
+                {children}
+            </div>
+        );
+
+        // -------------------- Top Navbar --------------------
+        const TopNav = ({ user }) => (
+            <nav
+                className="
+            sticky top-0 z-20 mb-8
+            bg-white/20 backdrop-blur-md border border-white/30
+            rounded-3xl
+            px-8 py-4 flex items-center justify-between
+            shadow-xl hover:shadow-2xl transition-all duration-300
+          "
+            >
+                <div className="flex items-center gap-4">
+                    <div
+                        className="
+                h-12 w-12 rounded-2xl bg-gradient-to-br
+                from-yellow-400 via-orange-400 to-red-400
+                flex items-center justify-center text-lg font-black text-white
+                shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-110
+                animate-pulse-slow
+              "
+                    >
+                        TM
+                    </div>
+                    <div>
+                        <h1 className="text-2xl font-bold tracking-tight font-display text-white">
+                            Task Manager
+                        </h1>
+                        <p className="text-sm text-white/80 font-medium">
+                            Premium productivity dashboard
+                        </p>
+                    </div>
+                </div>
+
+                <div className="flex items-center gap-6">
+                    <div className="flex items-center gap-4">
+                        <div className="flex flex-col items-end">
+                            <span className="text-sm text-white/70 font-medium">Hello,</span>
+                            <span className="text-base font-semibold text-white">
+                                {user?.name || "Guest"}
+                            </span>
+                        </div>
+                        <div
+                            className="
+                  h-12 w-12 rounded-full bg-gradient-to-br
+                  from-indigo-400 via-violet-400 to-purple-400
+                  flex items-center justify-center text-sm font-bold text-white
+                  shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-110
+                "
+                        >
+                            {user?.name ? user.name[0]?.toUpperCase() : "U"}
+                        </div>
+                    </div>
+                    <button
+                        onClick={() => {
+                            localStorage.removeItem("token");
+                            localStorage.removeItem("user");
+                            window.location.href = "login.html";
+                        }}
+                        className="
+                relative overflow-hidden group
+                rounded-full px-6 py-2.5 text-sm font-semibold text-white
+                bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500
+                shadow-lg hover:shadow-xl transition-all duration-300
+                hover:scale-105 hover:from-pink-600 hover:via-purple-600 hover:to-indigo-600
+                before:absolute before:inset-0 before:bg-white/20 before:opacity-0
+                hover:before:opacity-100 before:transition-opacity before:duration-300
+              "
+                    >
+                        <span className="relative z-10 flex items-center gap-2">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                            </svg>
+                            Logout
+                        </span>
+                    </button>
+                </div>
+            </nav>
+        );
+
+        // -------------------- Task Overview Chart --------------------
+        const TaskOverviewCard = ({ stats, loading }) => {
+            const canvasRef = React.useRef(null);
+
+            useEffect(() => {
+                if (!canvasRef.current || !stats || loading) return;
+
+                const ctx = canvasRef.current.getContext("2d");
+                if (!ctx) return;
+
+                const data = {
+                    labels: ["Pending", "In Progress", "Completed", "Overdue"],
+                    datasets: [
+                        {
+                            data: [
+                                stats.byStatus?.pending || 0,
+                                stats.byStatus?.["in-progress"] || 0,
+                                stats.byStatus?.completed || 0,
+                                stats.overdue || 0,
+                            ],
+                            backgroundColor: [
+                                "rgba(251, 191, 36, 0.9)",  // Amber
+                                "rgba(59, 130, 246, 0.9)",   // Blue
+                                "rgba(16, 185, 129, 0.9)",   // Green
+                                "rgba(239, 68, 68, 0.9)",     // Red
+                            ],
+                            borderWidth: 0,
+                            hoverOffset: 8,
+                        },
+                    ],
+                };
+
+                const chart = new Chart(ctx, {
+                    type: "doughnut",
+                    data,
+                    options: {
+                        cutout: "72%",
+                        plugins: {
+                            legend: {
+                                display: false,
+                            },
+                        },
+                        animation: {
+                            animateRotate: true,
+                            animateScale: true,
+                            duration: 1200,
+                            easing: 'easeInOutQuart',
+                        },
+                    },
+                });
+
+                return () => chart.destroy();
+            }, [stats, loading]);
+
+            return (
+                <GlassCard className="p-6 flex flex-col gap-6 col-span-1 lg:col-span-2">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-400 to-purple-400 flex items-center justify-center">
+                                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                                </svg>
+                            </div>
+                            <div>
+                                <h2 className="text-lg font-bold text-white uppercase tracking-wide">
+                                    Task Overview
+                                </h2>
+                                <p className="text-sm text-white/80">
+                                    Status distribution of your tasks
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    {loading ? (
+                        <div className="flex items-center justify-center h-48">
+                            <div className="w-12 h-12 border-3 border-white/40 border-t-transparent rounded-full animate-spin" />
+                        </div>
+                    ) : (
+                        <div className="flex flex-col md:flex-row items-center gap-8">
+                            <div className="relative h-48 w-48">
+                                <canvas ref={canvasRef} />
+                                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                                    <span className="text-sm text-white/80 font-medium">
+                                        Total Tasks
+                                    </span>
+                                    <span className="text-3xl font-bold text-white">
+                                        {stats?.total || 0}
+                                    </span>
+                                </div>
+                            </div>
+                            <div className="flex-1 grid grid-cols-2 gap-4">
+                                <StatusLegend
+                                    label="Pending"
+                                    value={stats?.byStatus?.pending || 0}
+                                    color="bg-amber-400"
+                                    icon="⏳"
+                                />
+                                <StatusLegend
+                                    label="In Progress"
+                                    value={stats?.byStatus?.["in-progress"] || 0}
+                                    color="bg-blue-400"
+                                    icon="🚀"
+                                />
+                                <StatusLegend
+                                    label="Completed"
+                                    value={stats?.byStatus?.completed || 0}
+                                    color="bg-emerald-400"
+                                    icon="✅"
+                                />
+                                <StatusLegend
+                                    label="Overdue"
+                                    value={stats?.overdue || 0}
+                                    color="bg-red-400"
+                                    icon="⚠️"
+                                />
+                            </div>
+                        </div>
+                    )}
+                </GlassCard>
+            );
+        };
+
+        const StatusLegend = ({ label, value, color, icon }) => (
+            <div className="flex items-center gap-3 p-3 rounded-2xl bg-white/10 hover:bg-white/15 transition-all duration-300 hover:scale-105">
+                <div className={`h-3 w-3 rounded-full ${color} shadow-lg`} />
+                <div className="flex justify-between items-center flex-1">
+                    <div className="flex items-center gap-2">
+                        <span className="text-lg">{icon}</span>
+                        <span className="text-white/90 font-medium">{label}</span>
+                    </div>
+                    <span className="text-xl font-bold text-white">{value}</span>
+                </div>
+            </div>
+        );
+
+        // -------------------- View toggle + filters --------------------
+        const ViewToggle = ({ view, setView }) => (
+            <div className="inline-flex items-center rounded-full bg-white/10 border border-white/20 p-1.5 shadow-lg">
+                <button
+                    onClick={() => setView("list")}
+                    className={`px-4 py-2 rounded-full transition-all duration-300 text-sm font-semibold
+              ${view === "list"
+                            ? "bg-white text-indigo-600 shadow-md scale-105"
+                            : "text-white/80 hover:bg-white/10 hover:text-white"}`}
+                >
+                    <span className="flex items-center gap-2">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                        </svg>
+                        List View
+                    </span>
+                </button>
+                <button
+                    onClick={() => setView("kanban")}
+                    className={`px-4 py-2 rounded-full transition-all duration-300 text-sm font-semibold
+              ${view === "kanban"
+                            ? "bg-white text-indigo-600 shadow-md scale-105"
+                            : "text-white/80 hover:bg-white/10 hover:text-white"}`}
+                >
+                    <span className="flex items-center gap-2">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
+                        </svg>
+                        Kanban View
+                    </span>
+                </button>
+            </div>
+        );
+
+        // -------------------- List View --------------------
+        const TaskListView = ({
+            tasks,
+            loading,
+            filters,
+            setFilters,
+            onEdit,
+            onDelete,
+        }) => {
+            return (
+                <GlassCard className="p-6 mt-6">
+                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-400 to-indigo-400 flex items-center justify-center">
+                                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                                </svg>
+                            </div>
+                            <div>
+                                <h2 className="text-lg font-bold text-white">My Tasks</h2>
+                                <span className="text-sm text-white/80">
+                                    {tasks.length} visible
+                                </span>
+                            </div>
+                        </div>
+                        <div className="flex flex-wrap gap-3">
+                            <input
+                                type="text"
+                                placeholder="Search tasks..."
+                                value={filters.search}
+                                onChange={(e) =>
+                                    setFilters((f) => ({ ...f, search: e.target.value, page: 1 }))
+                                }
+                                className="
+                    px-4 py-2.5 rounded-full bg-white/10 border border-white/20
+                    placeholder:text-white/50 text-sm focus:outline-none
+                    focus:ring-2 focus:ring-indigo-400/70 focus:bg-white/15
+                    transition-all duration-300
+                  "
+                            />
+                            <select
+                                value={filters.status}
+                                onChange={(e) =>
+                                    setFilters((f) => ({ ...f, status: e.target.value, page: 1 }))
+                                }
+                                className="px-4 py-2.5 rounded-full bg-white/10 border border-white/20 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/70 focus:bg-white/15 transition-all duration-300"
+                            >
+                                <option value="">All Status</option>
+                                <option value="pending">Pending</option>
+                                <option value="in-progress">In Progress</option>
+                                <option value="completed">Completed</option>
+                            </select>
+                            <select
+                                value={filters.priority}
+                                onChange={(e) =>
+                                    setFilters((f) => ({
+                                        ...f,
+                                        priority: e.target.value,
+                                        page: 1,
+                                    }))
+                                }
+                                className="px-4 py-2.5 rounded-full bg-white/10 border border-white/20 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/70 focus:bg-white/15 transition-all duration-300"
+                            >
+                                <option value="">All Priority</option>
+                                <option value="low">Low</option>
+                                <option value="medium">Medium</option>
+                                <option value="high">High</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    {loading ? (
+                        <div className="space-y-3">
+                            {[...Array(3)].map((_, i) => (
+                                <div
+                                    key={i}
+                                    className="h-14 rounded-2xl bg-white/10 animate-pulse"
+                                />
+                            ))}
+                        </div>
+                    ) : tasks.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-16 text-center">
+                            <div className="w-32 h-32 rounded-3xl bg-gradient-to-br from-white/10 to-white/5 border border-dashed border-white/30 mb-6 flex items-center justify-center">
+                                <span className="text-5xl">📝</span>
+                            </div>
+                            <h3 className="text-xl font-bold text-white mb-2">
+                                No tasks yet
+                            </h3>
+                            <p className="text-sm text-white/80">
+                                Create your first task to get started with your day.
+                            </p>
+                        </div>
+                    ) : (
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm md:text-base border-separate border-spacing-y-2">
+                                <thead className="text-xs uppercase text-white/70">
+                                    <tr>
+                                        <th className="text-left px-4 py-3 font-semibold">Title</th>
+                                        <th className="text-left px-4 py-3 hidden md:table-cell font-semibold">
+                                            Description
+                                        </th>
+                                        <th className="text-left px-4 py-3 font-semibold">Status</th>
+                                        <th className="text-left px-4 py-3 font-semibold">Priority</th>
+                                        <th className="text-left px-4 py-3 font-semibold">Due Date</th>
+                                        <th className="text-right px-4 py-3 font-semibold">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {tasks.map((task) => (
+                                        <tr key={task._id} className="group">
+                                            <td className="px-4 py-3 rounded-l-2xl bg-white/5 group-hover:bg-white/10 transition-colors duration-300">
+                                                <div className="font-semibold text-white">{task.title}</div>
+                                            </td>
+                                            <td className="px-4 py-3 bg-white/5 group-hover:bg-white/10 transition-colors duration-300 hidden md:table-cell">
+                                                <span className="text-white/80 text-sm line-clamp-2">
+                                                    {task.description || "-"}
+                                                </span>
+                                            </td>
+                                            <td className="px-4 py-3 bg-white/5 group-hover:bg-white/10 transition-colors duration-300">
+                                                <span
+                                                    className={`inline-flex items-center px-3 py-1 rounded-full border text-xs font-medium capitalize ${getStatusBadge(
+                                                        task.status
+                                                    )}`}
+                                                >
+                                                    {task.status}
+                                                </span>
+                                            </td>
+                                            <td className="px-4 py-3 bg-white/5 group-hover:bg-white/10 transition-colors duration-300">
+                                                <span
+                                                    className={`inline-flex items-center px-3 py-1 rounded-full border text-xs font-medium capitalize ${getPriorityBadge(
+                                                        task.priority
+                                                    )}`}
+                                                >
+                                                    {task.priority}
+                                                </span>
+                                            </td>
+                                            <td className="px-4 py-3 bg-white/5 group-hover:bg-white/10 transition-colors duration-300">
+                                                <span className="text-white/90 text-sm">
+                                                    {formatDate(task.dueDate)}
+                                                </span>
+                                            </td>
+                                            <td className="px-4 py-3 rounded-r-2xl bg-white/5 group-hover:bg-white/10 transition-colors duration-300 text-right space-x-2">
+                                                <button
+                                                    onClick={() => onEdit(task)}
+                                                    className="px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-500/80 hover:bg-emerald-400 text-white transition-all duration-300 hover:scale-105"
+                                                >
+                                                    Edit
+                                                </button>
+                                                <button
+                                                    onClick={() => onDelete(task)}
+                                                    className="px-3 py-1.5 rounded-full text-xs font-semibold bg-rose-500/80 hover:bg-rose-400 text-white transition-all duration-300 hover:scale-105"
+                                                >
+                                                    Delete
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </GlassCard>
+            );
+        };
+
+        // -------------------- Kanban View --------------------
+        const KanbanBoard = ({ tasks, loading, onTaskUpdate }) => {
+            const columns = useMemo(
+                () => ({
+                    pending: {
+                        id: "pending",
+                        title: "Pending",
+                        color: "from-amber-400/80 to-amber-500/60",
+                        icon: "⏳",
+                    },
+                    "in-progress": {
+                        id: "in-progress",
+                        title: "In Progress",
+                        color: "from-blue-400/80 to-blue-500/60",
+                        icon: "🚀",
+                    },
+                    completed: {
+                        id: "completed",
+                        title: "Completed",
+                        color: "from-emerald-400/80 to-emerald-500/60",
+                        icon: "✅",
+                    },
+                }),
+                []
+            );
+
+            const tasksByStatus = useMemo(() => {
+                const acc = {
+                    pending: [],
+                    "in-progress": [],
+                    completed: [],
+                };
+                tasks.forEach((t) => {
+                    const key = t.status || "pending";
+                    if (!acc[key]) acc[key] = [];
+                    acc[key].push(t);
+                });
+                return acc;
+            }, [tasks]);
+
+            const handleDragEnd = async (result) => {
+                if (!result.destination) return;
+                const { source, destination, draggableId } = result;
+                if (source.droppableId === destination.droppableId) return;
+
+                const newStatus = destination.droppableId;
+                const task = tasks.find((t) => t._id === draggableId);
+                if (!task) return;
+
+                onTaskUpdate(draggableId, { status: newStatus });
+            };
+
+            return (
+                <GlassCard className="p-6 mt-6">
+                    <div className="flex items-center justify-between mb-6">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-400 to-pink-400 flex items-center justify-center">
+                                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
+                                </svg>
+                            </div>
+                            <div>
+                                <h2 className="text-lg font-bold text-white">Kanban Board</h2>
+                                <p className="text-sm text-white/80">
+                                    Drag tasks between columns to update status.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    {loading ? (
+                        <div className="grid md:grid-cols-3 gap-6">
+                            {[...Array(3)].map((_, i) => (
+                                <div
+                                    key={i}
+                                    className="h-48 rounded-3xl bg-white/10 border border-white/20 animate-pulse"
+                                />
+                            ))}
+                        </div>
+                    ) : (
+                        <DragDropContext onDragEnd={handleDragEnd}>
+                            <div className="grid md:grid-cols-3 gap-6">
+                                {Object.values(columns).map((col) => (
+                                    <Droppable key={col.id} droppableId={col.id}>
+                                        {(provided) => (
+                                            <div
+                                                ref={provided.innerRef}
+                                                {...provided.droppableProps}
+                                                className="
+                            rounded-3xl bg-white/10 border border-white/20
+                            backdrop-blur-md p-4 flex flex-col gap-4
+                            min-h-[200px] hover:bg-white/15 transition-all duration-300
+                          "
+                                            >
+                                                <div className="flex items-center justify-between mb-2">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="text-2xl">{col.icon}</div>
+                                                        <div className="flex items-center gap-2">
+                                                            <div
+                                                                className={`h-8 w-8 rounded-xl bg-gradient-to-br ${col.color} flex items-center justify-center text-sm font-bold text-white shadow-lg`}
+                                                            >
+                                                                {tasksByStatus[col.id]?.length || 0}
+                                                            </div>
+                                                            <h3 className="text-sm font-bold uppercase tracking-wide text-white">
+                                                                {col.title}
+                                                            </h3>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="space-y-3">
+                                                    {(tasksByStatus[col.id] || []).map((task, index) => (
+                                                        <Draggable
+                                                            key={task._id}
+                                                            draggableId={task._id}
+                                                            index={index}
+                                                        >
+                                                            {(dragProvided, snapshot) => (
+                                                                <div
+                                                                    ref={dragProvided.innerRef}
+                                                                    {...dragProvided.draggableProps}
+                                                                    {...dragProvided.dragHandleProps}
+                                                                    className={`
+                                      rounded-2xl bg-white/20 border border-white/30 px-4 py-3
+                                      shadow-lg hover:shadow-xl transition-all duration-300 text-sm cursor-grab
+                                      ${snapshot.isDragging ? "scale-[1.03] shadow-2xl rotate-2" : "hover:-translate-y-1 hover:bg-white/25"}
+                                    `}
+                                                                >
+                                                                    <div className="font-semibold text-white mb-2">
+                                                                        {task.title}
+                                                                    </div>
+                                                                    <div className="flex items-center justify-between gap-2">
+                                                                        <span
+                                                                            className={`inline-flex items-center px-2 py-1 rounded-full border text-xs font-medium ${getPriorityBadge(
+                                                                                task.priority
+                                                                            )}`}
+                                                                        >
+                                                                            {task.priority}
+                                                                        </span>
+                                                                        <span className="text-white/80 text-xs">
+                                                                            {formatDate(task.dueDate)}
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </Draggable>
+                                                    ))}
+                                                    {provided.placeholder}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </Droppable>
+                                ))}
+                            </div>
+                        </DragDropContext>
+                    )}
+                </GlassCard>
+            );
+        };
+
+        // -------------------- Task Form --------------------
+        const TaskForm = ({ onSubmit, editingTask, onCancel }) => {
+            const [form, setForm] = useState(() => ({
+                title: editingTask?.title || "",
+                description: editingTask?.description || "",
+                status: editingTask?.status || "pending",
+                priority: editingTask?.priority || "medium",
+                dueDate: editingTask?.dueDate
+                    ? editingTask.dueDate.split("T")[0]
+                    : "",
+            }));
+
+            useEffect(() => {
+                setForm({
+                    title: editingTask?.title || "",
+                    description: editingTask?.description || "",
+                    status: editingTask?.status || "pending",
+                    priority: editingTask?.priority || "medium",
+                    dueDate: editingTask?.dueDate
+                        ? editingTask.dueDate.split("T")[0]
+                        : "",
+                });
+            }, [editingTask]);
+
+            const handleChange = (e) => {
+                const { name, value } = e.target;
+                setForm((f) => ({ ...f, [name]: value }));
+            };
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                onSubmit({
+                    ...form,
+                    title: form.title.trim(),
+                    description: form.description.trim(),
+                    dueDate: form.dueDate || undefined,
+                });
+            };
+
+            return (
+                <GlassCard className="p-6 mt-6">
+                    <form onSubmit={handleSubmit} className="space-y-4">
+                        <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-teal-400 flex items-center justify-center">
+                                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                    </svg>
+                                </div>
+                                <div>
+                                    <h2 className="text-lg font-bold text-white">
+                                        {editingTask ? "Edit Task" : "Create New Task"}
+                                    </h2>
+                                    <p className="text-sm text-white/80">
+                                        {editingTask
+                                            ? "Update details and save your changes."
+                                            : "Capture what you need to get done next."}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                        <div>
+                            <label className="block mb-2 text-sm font-medium text-white/90">
+                                Title *
+                            </label>
+                            <input
+                                name="title"
+                                value={form.title}
+                                onChange={handleChange}
+                                required
+                                placeholder="Enter task title"
+                                className="
+                    w-full px-4 py-3 rounded-2xl bg-white/10 border border-white/20
+                    text-white placeholder:text-white/50 text-sm focus:outline-none
+                    focus:ring-2 focus:ring-indigo-400/70 focus:bg-white/15
+                    transition-all duration-300
+                  "
+                            />
+                        </div>
+                        <div>
+                            <label className="block mb-2 text-sm font-medium text-white/90">
+                                Description
+                            </label>
+                            <textarea
+                                name="description"
+                                value={form.description}
+                                onChange={handleChange}
+                                rows={3}
+                                placeholder="Optional description"
+                                className="
+                    w-full px-4 py-3 rounded-2xl bg-white/10 border border-white/20
+                    text-white placeholder:text-white/50 text-sm resize-none focus:outline-none
+                    focus:ring-2 focus:ring-indigo-400/70 focus:bg-white/15
+                    transition-all duration-300
+                  "
+                            />
+                        </div>
+                        <div className="grid md:grid-cols-3 gap-4">
+                            <div>
+                                <label className="block mb-2 text-sm font-medium text-white/90">
+                                    Status
+                                </label>
+                                <select
+                                    name="status"
+                                    value={form.status}
+                                    onChange={handleChange}
+                                    className="
+                      w-full px-4 py-3 rounded-2xl bg-white/10 border border-white/20
+                      text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/70
+                      focus:bg-white/15 transition-all duration-300
+                    "
+                                >
+                                    <option value="pending">Pending</option>
+                                    <option value="in-progress">In Progress</option>
+                                    <option value="completed">Completed</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block mb-2 text-sm font-medium text-white/90">
+                                    Priority
+                                </label>
+                                <select
+                                    name="priority"
+                                    value={form.priority}
+                                    onChange={handleChange}
+                                    className="
+                      w-full px-4 py-3 rounded-2xl bg-white/10 border border-white/20
+                      text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/70
+                      focus:bg-white/15 transition-all duration-300
+                    "
+                                >
+                                    <option value="low">Low</option>
+                                    <option value="medium">Medium</option>
+                                    <option value="high">High</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block mb-2 text-sm font-medium text-white/90">
+                                    Due Date
+                                </label>
+                                <input
+                                    type="date"
+                                    name="dueDate"
+                                    value={form.dueDate}
+                                    onChange={handleChange}
+                                    className="
+                      w-full px-4 py-3 rounded-2xl bg-white/10 border border-white/20
+                      text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/70
+                      focus:bg-white/15 transition-all duration-300
+                    "
+                                />
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-3 pt-2">
+                            {editingTask && (
+                                <button
+                                    type="button"
+                                    onClick={onCancel}
+                                    className="
+                      px-6 py-2.5 rounded-full text-sm font-medium
+                      bg-white/10 border border-white/20 hover:bg-white/20
+                      text-white transition-all duration-300 hover:scale-105
+                    "
+                                >
+                                    Cancel
+                                </button>
+                            )}
+                            <button
+                                type="submit"
+                                className="
+                    px-6 py-2.5 rounded-full text-sm font-semibold
+                    bg-gradient-to-r from-indigo-400 via-violet-400 to-purple-400
+                    text-white shadow-lg hover:shadow-xl transition-all duration-300
+                    hover:scale-105 hover:from-indigo-500 hover:via-violet-500 hover:to-purple-500
+                  "
+                            >
+                                {editingTask ? "Save Changes" : "Create Task"}
+                            </button>
+                        </div>
+                    </form>
+                </GlassCard>
+            );
+        };
+
+        // -------------------- Main App --------------------
+        const App = () => {
+            const [view, setView] = useState("list");
+            const [tasks, setTasks] = useState([]);
+            const [stats, setStats] = useState(null);
+            const [filters, setFilters] = useState({
+                status: "",
+                priority: "",
+                search: "",
+                sortBy: "createdAt:desc",
+                page: 1,
+                limit: 50,
+            });
+            const [loadingTasks, setLoadingTasks] = useState(true);
+            const [loadingStats, setLoadingStats] = useState(true);
+            const [editingTask, setEditingTask] = useState(null);
+
+            useEffect(() => {
+                const token = getToken();
+                if (!token) {
+                    window.location.href = "login.html";
+                }
+            }, []);
+
+            const loadTasks = async () => {
+                try {
+                    setLoadingTasks(true);
+                    const data = await getTasksApi(filters);
+                    setTasks(data.data || []);
+                } catch (e) {
+                    console.error(e);
+                } finally {
+                    setLoadingTasks(false);
+                }
+            };
+
+            const loadStats = async () => {
+                try {
+                    setLoadingStats(true);
+                    const data = await getTaskStatsApi();
+                    setStats(data.data || data);
+                } catch (e) {
+                    console.error(e);
+                } finally {
+                    setLoadingStats(false);
+                }
+            };
+
+            useEffect(() => {
+                loadTasks();
+            }, [JSON.stringify(filters)]);
+
+            useEffect(() => {
+                loadStats();
+            }, []);
+
+            const handleCreateOrUpdate = async (data) => {
+                if (editingTask) {
+                    await updateTaskApi(editingTask._id, data);
+                    setEditingTask(null);
+                } else {
+                    await createTaskApi(data);
+                }
+                await Promise.all([loadTasks(), loadStats()]);
+            };
+
+            const handleDelete = async (task) => {
+                if (!window.confirm("Delete this task?")) return;
+                await deleteTaskApi(task._id);
+                await Promise.all([loadTasks(), loadStats()]);
+            };
+
+            const handleKanbanUpdate = async (id, updates) => {
+                await updateTaskApi(id, updates);
+                await Promise.all([loadTasks(), loadStats()]);
+            };
+
+            const user = getUser();
+
+            return (
+                <div className="max-w-7xl mx-auto px-4 py-6 md:py-10">
+                    <TopNav user={user} />
+
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+                        <GlassCard className="p-6">
+                            <div className="flex items-center gap-3 mb-6">
+                                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-yellow-400 to-orange-400 flex items-center justify-center">
+                                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                    </svg>
+                                </div>
+                                <div>
+                                    <h2 className="text-lg font-bold text-white">
+                                        Quick Stats
+                                    </h2>
+                                    <p className="text-sm text-white/80">
+                                        Your task metrics at a glance
+                                    </p>
+                                </div>
+                            </div>
+                            {loadingStats ? (
+                                <div className="grid grid-cols-2 gap-4">
+                                    {[...Array(4)].map((_, i) => (
+                                        <div
+                                            key={i}
+                                            className="h-20 rounded-2xl bg-white/10 animate-pulse"
+                                        />
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-2 gap-4">
+                                    <StatPill
+                                        label="Total"
+                                        value={stats?.total || 0}
+                                        icon="📊"
+                                        color="bg-blue-400"
+                                    />
+                                    <StatPill
+                                        label="Pending"
+                                        value={stats?.byStatus?.pending || 0}
+                                        icon="⏳"
+                                        color="bg-amber-400"
+                                    />
+                                    <StatPill
+                                        label="In Progress"
+                                        value={stats?.byStatus?.["in-progress"] || 0}
+                                        icon="🚀"
+                                        color="bg-blue-400"
+                                    />
+                                    <StatPill
+                                        label="Completed"
+                                        value={stats?.byStatus?.completed || 0}
+                                        icon="✅"
+                                        color="bg-emerald-400"
+                                    />
+                                </div>
+                            )}
+                        </GlassCard>
+
+                        <TaskOverviewCard stats={stats} loading={loadingStats} />
+                    </div>
+
+                    <div className="flex items-center justify-center mt-6">
+                        <ViewToggle view={view} setView={setView} />
+                    </div>
+
+                    <TaskForm
+                        editingTask={editingTask}
+                        onSubmit={handleCreateOrUpdate}
+                        onCancel={() => setEditingTask(null)}
+                    />
+
+                    {view === "list" ? (
+                        <TaskListView
+                            tasks={tasks}
+                            loading={loadingTasks}
+                            filters={filters}
+                            setFilters={setFilters}
+                            onEdit={(task) => setEditingTask(task)}
+                            onDelete={handleDelete}
+                        />
+                    ) : (
+                        <KanbanBoard
+                            tasks={tasks}
+                            loading={loadingTasks}
+                            onTaskUpdate={handleKanbanUpdate}
+                        />
+                    )}
+                </div>
+            );
+        };
+
+        const StatPill = ({ label, value, icon, color }) => (
+            <div className="group relative overflow-hidden rounded-2xl bg-white/10 border border-white/20 p-4 hover:bg-white/15 transition-all duration-300 hover:scale-105 hover:shadow-xl">
+                <div className="relative z-10">
+                    <div className="flex items-center justify-between mb-2">
+                        <span className="text-2xl">{icon}</span>
+                        <div className={`h-2 w-2 rounded-full ${color} animate-pulse`} />
+                    </div>
+                    <div className="text-sm text-white/80 font-medium mb-1">
+                        {label}
+                    </div>
+                    <div className="text-2xl font-bold text-white">
+                        {value}
+                    </div>
+                </div>
+                <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+            </div>
+        );
+
+        const root = ReactDOM.createRoot(document.getElementById("root"));
+        root.render(<App />);
+    </script>
+</body>
+
+</html>
