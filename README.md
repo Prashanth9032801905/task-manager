@@ -200,4 +200,4 @@ ISC
 
 ## Author
 
-Task Manager Application - Full-Stack Web Application
+Prashanth - Full-Stack Web Developer
